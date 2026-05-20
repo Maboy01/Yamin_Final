@@ -1,15 +1,31 @@
 import os
 import tempfile
 import torch
+import dataclasses
 import streamlit as st
 
-# Patch torch.load before fairseq is imported — PyTorch 2.6+ defaults weights_only=True
-# which breaks fairseq's checkpoint loader for HuBERT.
+# Patch 1: torch.load — PyTorch 2.6+ defaults weights_only=True, breaks fairseq HuBERT loader.
 _orig_load = torch.load
 def _patched_load(*args, **kwargs):
     kwargs.setdefault("weights_only", False)
     return _orig_load(*args, **kwargs)
 torch.load = _patched_load
+
+# Patch 2: fairseq uses mutable dataclass instances as field defaults, which Python 3.10+
+# rejects. Replace any such field with field(default_factory=type(val)) before @dataclass runs.
+_orig_dc = dataclasses.dataclass
+def _permissive_dc(cls=None, /, **kwargs):
+    def apply(klass):
+        for fname in list(getattr(klass, "__annotations__", {})):
+            val = klass.__dict__.get(fname, dataclasses.MISSING)
+            if (val is not dataclasses.MISSING
+                    and not isinstance(val, dataclasses.Field)
+                    and dataclasses.is_dataclass(val)):
+                _t = type(val)
+                setattr(klass, fname, dataclasses.field(default_factory=_t))
+        return _orig_dc(klass, **kwargs)
+    return apply if cls is None else apply(cls)
+dataclasses.dataclass = _permissive_dc
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "Yamin23_50e_1300s.pth")
 INDEX_PATH = os.path.join(os.path.dirname(__file__), "Yamin23.index")
