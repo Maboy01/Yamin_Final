@@ -20,3 +20,4 @@ sacrebleu
 editdistance
 scipy
 librosa
+edge-tts

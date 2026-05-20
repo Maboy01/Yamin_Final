@@ -104,8 +104,21 @@ def load_rvc():
     return rvc
 
 
-def convert(audio_bytes: bytes, f0_up_key: int = 0, index_rate: float = 0.75) -> bytes:
+def _ensure_wav(audio_bytes: bytes, filename: str) -> bytes:
+    ext = os.path.splitext(filename)[1].lower()
+    if ext == ".wav":
+        return audio_bytes
+    import io, librosa, soundfile as sf
+    y, sr = librosa.load(io.BytesIO(audio_bytes), sr=None, mono=True)
+    buf = io.BytesIO()
+    sf.write(buf, y, sr, format="WAV", subtype="PCM_16")
+    return buf.getvalue()
+
+
+def convert(audio_bytes: bytes, f0_up_key: int = 0, index_rate: float = 0.75,
+            filename: str = "input.wav") -> bytes:
     rvc = load_rvc()
+    audio_bytes = _ensure_wav(audio_bytes, filename)
 
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_in:
         tmp_in.write(audio_bytes)
@@ -124,3 +137,34 @@ def convert(audio_bytes: bytes, f0_up_key: int = 0, index_rate: float = 0.75) ->
             os.unlink(output_path)
 
     return result
+
+
+def text_to_audio(text: str, voice: str = "es-MX-JorgeNeural") -> bytes:
+    import edge_tts
+    import asyncio
+    import io
+    import threading
+
+    async def _run():
+        communicate = edge_tts.Communicate(text, voice)
+        buf = io.BytesIO()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                buf.write(chunk["data"])
+        return buf.getvalue()
+
+    result = [None]
+    exc = [None]
+
+    def _thread():
+        try:
+            result[0] = asyncio.run(_run())
+        except Exception as e:
+            exc[0] = e
+
+    t = threading.Thread(target=_thread)
+    t.start()
+    t.join()
+    if exc[0]:
+        raise exc[0]
+    return result[0]

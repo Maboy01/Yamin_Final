@@ -1,6 +1,7 @@
 from install import ensure_deps
 ensure_deps()
 
+import io
 import streamlit as st
 import voice_converter
 
@@ -133,35 +134,80 @@ if "recorder_id" not in st.session_state:
     st.session_state["recorder_id"] = 0
 
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.markdown('<p class="step-label">PASO 1 — GRABA TU VOZ</p>', unsafe_allow_html=True)
-audio_input = st.audio_input(
-    "Mantén presionado el botón para grabar",
-    key=f"recorder_{st.session_state['recorder_id']}",
-)
+st.markdown('<p class="step-label">PASO 1 — ELIGE TU AUDIO</p>', unsafe_allow_html=True)
+
+tab_record, tab_upload, tab_text = st.tabs(["🎤 Grabar", "📁 Subir archivo", "✍️ Texto"])
+
+audio_input = None
+audio_filename = "input.wav"
+
+with tab_record:
+    recorded = st.audio_input(
+        "Mantén presionado el botón para grabar",
+        key=f"recorder_{st.session_state['recorder_id']}",
+    )
+    if recorded is not None:
+        audio_input = recorded
+
+with tab_upload:
+    uploaded = st.file_uploader(
+        "Arrastra o selecciona un archivo de audio",
+        type=["wav", "mp3", "ogg", "flac", "m4a"],
+        help="Soporta WAV, MP3, OGG, FLAC, M4A",
+    )
+    if uploaded is not None:
+        audio_input = uploaded
+        audio_filename = uploaded.name
+        st.audio(uploaded)
+
+with tab_text:
+    tts_text = st.text_area(
+        "Escribe lo que quieres que diga",
+        placeholder="¡Voy a superar mis propios límites!",
+        max_chars=400,
+        label_visibility="collapsed",
+    )
+    if st.button("🎙️ GENERAR AUDIO", disabled=not bool(tts_text and tts_text.strip())):
+        with st.spinner("Generando voz..."):
+            try:
+                tts_bytes = voice_converter.text_to_audio(tts_text.strip())
+                st.session_state["tts_audio"] = tts_bytes
+            except Exception as e:
+                st.error(f"Error al generar voz: {e}")
+
+    if "tts_audio" in st.session_state:
+        st.audio(st.session_state["tts_audio"], format="audio/mpeg")
+        audio_input = io.BytesIO(st.session_state["tts_audio"])
+        audio_filename = "tts.mp3"
 
 if audio_input is not None or "converted" in st.session_state:
-    if st.button("🔄 REINICIAR (grabar otro audio)"):
+    if st.button("🔄 REINICIAR"):
         st.session_state["recorder_id"] += 1
-        st.session_state.pop("converted", None)
+        for key in ("converted", "original_audio", "tts_audio"):
+            st.session_state.pop(key, None)
         st.rerun()
 st.markdown("</div>", unsafe_allow_html=True)
 
-if audio_input is not None:
+if audio_input is not None and audio_filename == "input.wav":
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<p class="step-label">PASO 2 — AUDIO ORIGINAL</p>', unsafe_allow_html=True)
-    st.audio(audio_input, format="audio/wav")
+    st.audio(audio_input)
     st.markdown("</div>", unsafe_allow_html=True)
 
+if audio_input is not None:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<p class="step-label">PASO 3 — CONVERTIR VOZ</p>', unsafe_allow_html=True)
 
     if st.button("🔥 CONVERTIR VOZ"):
         with st.spinner("Convirtiendo... (puede tardar unos segundos)"):
             try:
+                raw_bytes = audio_input.read()
+                st.session_state["original_audio"] = (raw_bytes, audio_filename)
                 converted_bytes = voice_converter.convert(
-                    audio_bytes=audio_input.read(),
+                    audio_bytes=raw_bytes,
                     f0_up_key=f0_up_key,
                     index_rate=index_rate,
+                    filename=audio_filename,
                 )
                 st.session_state["converted"] = converted_bytes
                 st.success("¡Conversión completada!")
@@ -177,13 +223,23 @@ if audio_input is not None:
 
 if "converted" in st.session_state:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown('<p class="step-label">PASO 4 — RESULTADO</p>', unsafe_allow_html=True)
-    st.audio(st.session_state["converted"], format="audio/wav")
+    st.markdown('<p class="step-label">PASO 4 — COMPARATIVA</p>', unsafe_allow_html=True)
+
+    col_orig, col_conv = st.columns(2)
+    with col_orig:
+        st.markdown("**Tu voz / TTS**")
+        if "original_audio" in st.session_state:
+            orig_bytes, orig_fname = st.session_state["original_audio"]
+            orig_fmt = "audio/mpeg" if orig_fname.endswith(".mp3") else "audio/wav"
+            st.audio(orig_bytes, format=orig_fmt)
+    with col_conv:
+        st.markdown("**Voz de Goku 🔥**")
+        st.audio(st.session_state["converted"], format="audio/wav")
 
     st.download_button(
         label="⬇️ DESCARGAR AUDIO CONVERTIDO",
         data=st.session_state["converted"],
-        file_name="yamin_converted.wav",
+        file_name="goku_voice.wav",
         mime="audio/wav",
     )
     st.markdown("</div>", unsafe_allow_html=True)
