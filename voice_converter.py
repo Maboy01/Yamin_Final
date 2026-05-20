@@ -11,22 +11,23 @@ def _patched_load(*args, **kwargs):
     return _orig_load(*args, **kwargs)
 torch.load = _patched_load
 
-# Patch 2: fairseq uses mutable dataclass instances as field defaults (Python 3.10+ rejects).
-# Intercept _process_class: fix only the classes that actually trigger the error.
+# Patch 2: fairseq uses mutable dataclass instances as field defaults; Python 3.11+
+# rejects with "mutable default ... use default_factory". Pre-process the class BEFORE
+# @dataclass runs to convert ANY dataclass-instance default (raw or wrapped in field())
+# into an equivalent default_factory. Covers inherited fields via getattr.
 _orig_process = dataclasses._process_class
 def _lenient_process(cls, *args, **kwargs):
-    try:
-        return _orig_process(cls, *args, **kwargs)
-    except (TypeError, ValueError) as e:
-        if "mutable default" not in str(e):
-            raise
-        for fname in list(getattr(cls, "__annotations__", {})):
-            val = cls.__dict__.get(fname, dataclasses.MISSING)
-            if (val is not dataclasses.MISSING
-                    and not isinstance(val, dataclasses.Field)
-                    and dataclasses.is_dataclass(val)):
-                setattr(cls, fname, dataclasses.field(default_factory=type(val)))
-        return _orig_process(cls, *args, **kwargs)
+    for fname in list(getattr(cls, "__annotations__", {})):
+        val = getattr(cls, fname, dataclasses.MISSING)
+        if val is dataclasses.MISSING:
+            continue
+        # Extract underlying default (handles both `x: T = T()` and `x: T = field(default=T())`)
+        default_val = val.default if isinstance(val, dataclasses.Field) else val
+        if (default_val is not dataclasses.MISSING
+                and not isinstance(default_val, type)
+                and dataclasses.is_dataclass(default_val)):
+            setattr(cls, fname, dataclasses.field(default_factory=type(default_val)))
+    return _orig_process(cls, *args, **kwargs)
 dataclasses._process_class = _lenient_process
 
 # Patch 3: fairseq passes dataclasses.MISSING to OmegaConf; OmegaConf rejects it
