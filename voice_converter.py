@@ -29,16 +29,20 @@ def _lenient_process(cls, *args, **kwargs):
         return _orig_process(cls, *args, **kwargs)
 dataclasses._process_class = _lenient_process
 
-# Patch 3: OmegaConf 2.3.0 doesn't recognize dataclasses.MISSING (only omegaconf.MISSING).
-# fairseq 0.12.2 passes dataclasses.MISSING into OmegaConf internals → TypeError.
+# Patch 3: fairseq passes dataclasses.MISSING to OmegaConf; OmegaConf 2.3+ rejects it.
+# _maybe_wrap is defined in omegaconf.omegaconf (not _utils); _utils imports it lazily
+# inside get_dataclass_data(), so patching the module attribute is picked up at call time.
 try:
-    from omegaconf import _utils as _oc_utils, MISSING as _OC_MISSING
-    _orig_mw = _oc_utils._maybe_wrap
-    def _patched_mw(ref_type, key, value, *args, **kwargs):
-        if type(value).__name__ == "_MISSING_TYPE":
+    import omegaconf.omegaconf as _oc_oc
+    from omegaconf import MISSING as _OC_MISSING
+    _MISSING_TYPE = type(dataclasses.MISSING)
+    _orig_mw = _oc_oc._maybe_wrap
+    def _patched_mw(ref_type, key, value, is_optional, parent):
+        if isinstance(value, _MISSING_TYPE):
             value = _OC_MISSING
-        return _orig_mw(ref_type, key, value, *args, **kwargs)
-    _oc_utils._maybe_wrap = _patched_mw
+        return _orig_mw(ref_type=ref_type, key=key, value=value,
+                        is_optional=is_optional, parent=parent)
+    _oc_oc._maybe_wrap = _patched_mw
 except Exception:
     pass
 
