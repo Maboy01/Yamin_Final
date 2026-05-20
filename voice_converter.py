@@ -17,7 +17,7 @@ _orig_process = dataclasses._process_class
 def _lenient_process(cls, *args, **kwargs):
     try:
         return _orig_process(cls, *args, **kwargs)
-    except TypeError as e:
+    except (TypeError, ValueError) as e:
         if "mutable default" not in str(e):
             raise
         for fname in list(getattr(cls, "__annotations__", {})):
