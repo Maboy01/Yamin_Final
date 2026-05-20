@@ -30,19 +30,22 @@ def _lenient_process(cls, *args, **kwargs):
 dataclasses._process_class = _lenient_process
 
 # Patch 3: fairseq passes dataclasses.MISSING to OmegaConf; OmegaConf rejects it
-# with "Object of unsupported type: '_MISSING_TYPE'". Intercept at _node_wrap
-# (the chokepoint that actually raises the error) and at _maybe_wrap (the higher-
-# level wrapper). Both are patched wherever they live, since their module location
-# has varied across OmegaConf versions.
+# with "Object of unsupported type: '_MISSING_TYPE'". Walk every loaded omegaconf
+# submodule and rewrite any reference to _node_wrap / _maybe_wrap, since those
+# functions get re-imported by name across multiple submodules (dictconfig,
+# listconfig, omegaconf) and a single-module patch misses local references.
+import sys
 import importlib
 try:
-    from omegaconf import MISSING as _OC_MISSING
+    from omegaconf import MISSING as _OC_MISSING, OmegaConf as _OmegaConf
     _MISSING_TYPE = type(dataclasses.MISSING)
 
     def _scrub(v):
         return _OC_MISSING if isinstance(v, _MISSING_TYPE) else v
 
     def _wrap(orig):
+        if getattr(orig, "_yamin_patched", False):
+            return orig
         def patched(*args, **kwargs):
             args = tuple(_scrub(a) for a in args)
             kwargs = {k: _scrub(v) for k, v in kwargs.items()}
@@ -50,24 +53,41 @@ try:
         patched._yamin_patched = True
         return patched
 
-    _targets = [
-        ("omegaconf._utils", "_node_wrap"),
-        ("omegaconf.omegaconf", "_maybe_wrap"),
-        ("omegaconf._utils", "_maybe_wrap"),
-    ]
-    _patched_any = False
-    for _mod_name, _fn_name in _targets:
+    # Force-load the submodules likely to hold local references to the wrappers
+    for _sub in ("omegaconf._utils", "omegaconf.omegaconf",
+                 "omegaconf.dictconfig", "omegaconf.listconfig",
+                 "omegaconf.basecontainer", "omegaconf._impl"):
         try:
-            _mod = importlib.import_module(_mod_name)
-            _fn = getattr(_mod, _fn_name, None)
-            if _fn is not None and not getattr(_fn, "_yamin_patched", False):
-                setattr(_mod, _fn_name, _wrap(_fn))
-                _patched_any = True
+            importlib.import_module(_sub)
         except Exception:
             pass
-    if not _patched_any:
-        print("[voice_converter] WARNING: OmegaConf MISSING patch did not install",
-              flush=True)
+
+    _patch_count = 0
+    for _mod_name, _mod in list(sys.modules.items()):
+        if not _mod_name.startswith("omegaconf"):
+            continue
+        for _attr in ("_node_wrap", "_maybe_wrap"):
+            _fn = getattr(_mod, _attr, None)
+            if callable(_fn) and not getattr(_fn, "_yamin_patched", False):
+                setattr(_mod, _attr, _wrap(_fn))
+                _patch_count += 1
+
+    # Safety net: scrub input to OmegaConf.create / OmegaConf.structured
+    def _wrap_create(orig):
+        def patched(*args, **kwargs):
+            args = tuple(_scrub(a) for a in args)
+            kwargs = {k: _scrub(v) for k, v in kwargs.items()}
+            return orig(*args, **kwargs)
+        patched._yamin_patched = True
+        return patched
+    for _meth in ("create", "structured"):
+        _fn = getattr(_OmegaConf, _meth, None)
+        if _fn is not None and not getattr(_fn, "_yamin_patched", False):
+            setattr(_OmegaConf, _meth, _wrap_create(_fn))
+            _patch_count += 1
+
+    print(f"[voice_converter] OmegaConf MISSING patch installed "
+          f"({_patch_count} hooks)", flush=True)
 except Exception as _e:
     print(f"[voice_converter] WARNING: OmegaConf patch failed: {_e}", flush=True)
 
