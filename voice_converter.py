@@ -11,21 +11,36 @@ def _patched_load(*args, **kwargs):
     return _orig_load(*args, **kwargs)
 torch.load = _patched_load
 
-# Patch 2: fairseq uses mutable dataclass instances as field defaults, which Python 3.10+
-# rejects. Replace any such field with field(default_factory=type(val)) before @dataclass runs.
-_orig_dc = dataclasses.dataclass
-def _permissive_dc(cls=None, /, **kwargs):
-    def apply(klass):
-        for fname in list(getattr(klass, "__annotations__", {})):
-            val = klass.__dict__.get(fname, dataclasses.MISSING)
+# Patch 2: fairseq uses mutable dataclass instances as field defaults (Python 3.10+ rejects).
+# Intercept _process_class: fix only the classes that actually trigger the error.
+_orig_process = dataclasses._process_class
+def _lenient_process(cls, *args, **kwargs):
+    try:
+        return _orig_process(cls, *args, **kwargs)
+    except TypeError as e:
+        if "mutable default" not in str(e):
+            raise
+        for fname in list(getattr(cls, "__annotations__", {})):
+            val = cls.__dict__.get(fname, dataclasses.MISSING)
             if (val is not dataclasses.MISSING
                     and not isinstance(val, dataclasses.Field)
                     and dataclasses.is_dataclass(val)):
-                _t = type(val)
-                setattr(klass, fname, dataclasses.field(default_factory=_t))
-        return _orig_dc(klass, **kwargs)
-    return apply if cls is None else apply(cls)
-dataclasses.dataclass = _permissive_dc
+                setattr(cls, fname, dataclasses.field(default_factory=type(val)))
+        return _orig_process(cls, *args, **kwargs)
+dataclasses._process_class = _lenient_process
+
+# Patch 3: OmegaConf 2.3.0 doesn't recognize dataclasses.MISSING (only omegaconf.MISSING).
+# fairseq 0.12.2 passes dataclasses.MISSING into OmegaConf internals → TypeError.
+try:
+    from omegaconf import _utils as _oc_utils, MISSING as _OC_MISSING
+    _orig_mw = _oc_utils._maybe_wrap
+    def _patched_mw(ref_type, key, value, *args, **kwargs):
+        if type(value).__name__ == "_MISSING_TYPE":
+            value = _OC_MISSING
+        return _orig_mw(ref_type, key, value, *args, **kwargs)
+    _oc_utils._maybe_wrap = _patched_mw
+except Exception:
+    pass
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "Yamin23_50e_1300s.pth")
 INDEX_PATH = os.path.join(os.path.dirname(__file__), "Yamin23.index")
