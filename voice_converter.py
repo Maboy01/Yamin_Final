@@ -29,22 +29,47 @@ def _lenient_process(cls, *args, **kwargs):
         return _orig_process(cls, *args, **kwargs)
 dataclasses._process_class = _lenient_process
 
-# Patch 3: fairseq passes dataclasses.MISSING to OmegaConf; OmegaConf 2.3+ rejects it.
-# _maybe_wrap is defined in omegaconf.omegaconf (not _utils); _utils imports it lazily
-# inside get_dataclass_data(), so patching the module attribute is picked up at call time.
+# Patch 3: fairseq passes dataclasses.MISSING to OmegaConf; OmegaConf rejects it
+# with "Object of unsupported type: '_MISSING_TYPE'". Intercept at _node_wrap
+# (the chokepoint that actually raises the error) and at _maybe_wrap (the higher-
+# level wrapper). Both are patched wherever they live, since their module location
+# has varied across OmegaConf versions.
+import importlib
 try:
-    import omegaconf.omegaconf as _oc_oc
     from omegaconf import MISSING as _OC_MISSING
     _MISSING_TYPE = type(dataclasses.MISSING)
-    _orig_mw = _oc_oc._maybe_wrap
-    def _patched_mw(ref_type, key, value, is_optional, parent):
-        if isinstance(value, _MISSING_TYPE):
-            value = _OC_MISSING
-        return _orig_mw(ref_type=ref_type, key=key, value=value,
-                        is_optional=is_optional, parent=parent)
-    _oc_oc._maybe_wrap = _patched_mw
-except Exception:
-    pass
+
+    def _scrub(v):
+        return _OC_MISSING if isinstance(v, _MISSING_TYPE) else v
+
+    def _wrap(orig):
+        def patched(*args, **kwargs):
+            args = tuple(_scrub(a) for a in args)
+            kwargs = {k: _scrub(v) for k, v in kwargs.items()}
+            return orig(*args, **kwargs)
+        patched._yamin_patched = True
+        return patched
+
+    _targets = [
+        ("omegaconf._utils", "_node_wrap"),
+        ("omegaconf.omegaconf", "_maybe_wrap"),
+        ("omegaconf._utils", "_maybe_wrap"),
+    ]
+    _patched_any = False
+    for _mod_name, _fn_name in _targets:
+        try:
+            _mod = importlib.import_module(_mod_name)
+            _fn = getattr(_mod, _fn_name, None)
+            if _fn is not None and not getattr(_fn, "_yamin_patched", False):
+                setattr(_mod, _fn_name, _wrap(_fn))
+                _patched_any = True
+        except Exception:
+            pass
+    if not _patched_any:
+        print("[voice_converter] WARNING: OmegaConf MISSING patch did not install",
+              flush=True)
+except Exception as _e:
+    print(f"[voice_converter] WARNING: OmegaConf patch failed: {_e}", flush=True)
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "Yamin23_50e_1300s.pth")
 INDEX_PATH = os.path.join(os.path.dirname(__file__), "Yamin23.index")
