@@ -156,7 +156,12 @@ if audio_input is not None:
                 st.session_state["converted"] = converted_bytes
                 st.success("¡Conversión completada!")
             except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
                 st.error(f"Error durante la conversión: {e}")
+                with st.expander("Ver traceback completo (debug)", expanded=True):
+                    st.code(tb, language="python")
+                print(tb, flush=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
