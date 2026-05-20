@@ -124,11 +124,6 @@ with st.sidebar:
         help="Qué tanto influye el índice FAISS. Más alto = más parecido al modelo.",
     )
 
-    st.markdown("---")
-    st.markdown("**Modelo cargado:**")
-    st.code("Yamin23_50e_1300s.pth", language=None)
-    st.markdown("**Índice:**")
-    st.code("Yamin23.index", language=None)
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 if "recorder_id" not in st.session_state:
