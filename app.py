@@ -99,7 +99,10 @@ st.markdown(
 )
 
 st.markdown('<h1 class="main-title">⚡ DOBLAJE GOKU ⚡</h1>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Powered by RVC — Applio Model</p>', unsafe_allow_html=True)
+st.markdown(
+    '<p class="subtitle">Convierte tu voz al estilo de Goku con IA</p>',
+    unsafe_allow_html=True,
+)
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
