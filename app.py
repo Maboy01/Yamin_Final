@@ -5,7 +5,7 @@ import streamlit as st
 import voice_converter
 
 st.set_page_config(
-    page_title="Yamin Voice Changer",
+    page_title="Doblaje Goku",
     page_icon="🔥",
     layout="centered",
 )
@@ -98,7 +98,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.markdown('<h1 class="main-title">⚡ YAMIN VOICE CHANGER ⚡</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-title">⚡ DOBLAJE GOKU ⚡</h1>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Powered by RVC — Applio Model</p>', unsafe_allow_html=True)
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
