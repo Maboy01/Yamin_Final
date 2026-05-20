@@ -131,9 +131,21 @@ with st.sidebar:
     st.code("Yamin23.index", language=None)
 
 # ── Main ─────────────────────────────────────────────────────────────────────
+if "recorder_id" not in st.session_state:
+    st.session_state["recorder_id"] = 0
+
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.markdown('<p class="step-label">PASO 1 — GRABA TU VOZ</p>', unsafe_allow_html=True)
-audio_input = st.audio_input("Mantén presionado el botón para grabar")
+audio_input = st.audio_input(
+    "Mantén presionado el botón para grabar",
+    key=f"recorder_{st.session_state['recorder_id']}",
+)
+
+if audio_input is not None or "converted" in st.session_state:
+    if st.button("🔄 REINICIAR (grabar otro audio)"):
+        st.session_state["recorder_id"] += 1
+        st.session_state.pop("converted", None)
+        st.rerun()
 st.markdown("</div>", unsafe_allow_html=True)
 
 if audio_input is not None:
