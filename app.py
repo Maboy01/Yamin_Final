@@ -1,3 +1,6 @@
+# Punto de entrada de la aplicación.
+# ensure_deps() instala fairseq y rvc-python en la carpeta vendor/ si aún no están,
+# evitando que el usuario tenga que correr pip manualmente.
 from install import ensure_deps
 ensure_deps()
 
@@ -5,12 +8,14 @@ import io
 import streamlit as st
 import voice_converter
 
+# Configuración general de la página de Streamlit (título, ícono y ancho del layout).
 st.set_page_config(
     page_title="Doblaje Goku",
     page_icon="🔥",
     layout="centered",
 )
 
+# Inyección de CSS personalizado: fuentes, colores oscuros temáticos y estilos de botones.
 st.markdown(
     """
     <style>
@@ -110,6 +115,8 @@ with st.sidebar:
     st.markdown("### ⚙️ Configuración")
     st.markdown("---")
 
+    # f0_up_key: desplazamiento de tono en semitonos que se pasa al modelo RVC.
+    # Valores negativos bajan el tono; positivos lo suben.
     f0_up_key = st.slider(
         "🎵 Tono (Pitch)",
         min_value=-12,
@@ -119,6 +126,8 @@ with st.sidebar:
         help="Sube o baja el tono en semitonos. 0 = sin cambio.",
     )
 
+    # index_rate: peso del índice FAISS de características de timbre.
+    # 0 = ignorar el índice (solo el modelo); 1 = máxima influencia del índice.
     index_rate = st.slider(
         "🧬 Index Rate",
         min_value=0.0,
@@ -130,18 +139,24 @@ with st.sidebar:
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
+
+# recorder_id es un contador que fuerza el re-montado del widget de grabación
+# al presionar "Reiniciar", descartando el audio previo sin recargar la página.
 if "recorder_id" not in st.session_state:
     st.session_state["recorder_id"] = 0
 
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.markdown('<p class="step-label">PASO 1 — ELIGE TU AUDIO</p>', unsafe_allow_html=True)
 
+# Tres pestañas de entrada: grabación en vivo, carga de archivo o texto convertido a voz.
 tab_record, tab_upload, tab_text = st.tabs(["🎤 Grabar", "📁 Subir archivo", "✍️ Texto"])
 
-audio_input = None
-audio_filename = "input.wav"
+audio_input = None        # Objeto de audio que se pasará al convertidor.
+audio_filename = "input.wav"  # Nombre usado para inferir el formato del archivo.
 
 with tab_record:
+    # st.audio_input captura audio directamente desde el micrófono del navegador.
+    # La clave dinámica permite resetear el widget incrementando recorder_id.
     recorded = st.audio_input(
         "Mantén presionado el botón para grabar",
         key=f"recorder_{st.session_state['recorder_id']}",
@@ -150,6 +165,7 @@ with tab_record:
         audio_input = recorded
 
 with tab_upload:
+    # Acepta los formatos más comunes; si no es WAV, _ensure_wav() lo convierte internamente.
     uploaded = st.file_uploader(
         "Arrastra o selecciona un archivo de audio",
         type=["wav", "mp3", "ogg", "flac", "m4a"],
@@ -167,9 +183,11 @@ with tab_text:
         max_chars=400,
         label_visibility="collapsed",
     )
+    # El botón solo se habilita cuando hay texto no vacío.
     if st.button("🎙️ GENERAR AUDIO", disabled=not bool(tts_text and tts_text.strip())):
         with st.spinner("Generando voz..."):
             try:
+                # Llama al motor Edge TTS de Microsoft para sintetizar la voz en español.
                 tts_bytes = voice_converter.text_to_audio(tts_text.strip())
                 st.session_state["tts_audio"] = tts_bytes
             except Exception as e:
@@ -177,17 +195,22 @@ with tab_text:
 
     if "tts_audio" in st.session_state:
         st.audio(st.session_state["tts_audio"], format="audio/mpeg")
+        # Envuelve los bytes en un buffer para que la función convert() pueda leerlos.
         audio_input = io.BytesIO(st.session_state["tts_audio"])
         audio_filename = "tts.mp3"
 
+# Muestra el botón de reinicio si ya hay audio cargado o una conversión en memoria.
 if audio_input is not None or "converted" in st.session_state:
     if st.button("🔄 REINICIAR"):
+        # Incrementar recorder_id invalida el widget de grabación anterior.
         st.session_state["recorder_id"] += 1
         for key in ("converted", "original_audio", "tts_audio"):
             st.session_state.pop(key, None)
         st.rerun()
 st.markdown("</div>", unsafe_allow_html=True)
 
+# Solo muestra el reproductor "original" cuando el audio viene de grabación (no de TTS ni upload),
+# porque en esos casos el usuario ya escuchó su audio en la pestaña correspondiente.
 if audio_input is not None and audio_filename == "input.wav":
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<p class="step-label">PASO 2 — AUDIO ORIGINAL</p>', unsafe_allow_html=True)
@@ -202,7 +225,9 @@ if audio_input is not None:
         with st.spinner("Convirtiendo... (puede tardar unos segundos)"):
             try:
                 raw_bytes = audio_input.read()
+                # Guarda el audio original para mostrarlo en la comparativa del Paso 4.
                 st.session_state["original_audio"] = (raw_bytes, audio_filename)
+                # Llama al núcleo de conversión de voz con los parámetros del sidebar.
                 converted_bytes = voice_converter.convert(
                     audio_bytes=raw_bytes,
                     f0_up_key=f0_up_key,
@@ -215,12 +240,14 @@ if audio_input is not None:
                 import traceback
                 tb = traceback.format_exc()
                 st.error(f"Error durante la conversión: {e}")
+                # Muestra el traceback completo para facilitar el diagnóstico.
                 with st.expander("Ver traceback completo (debug)", expanded=True):
                     st.code(tb, language="python")
                 print(tb, flush=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
+# Paso 4: comparativa lado a lado entre el audio fuente y el audio convertido.
 if "converted" in st.session_state:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<p class="step-label">PASO 4 — COMPARATIVA</p>', unsafe_allow_html=True)
@@ -230,12 +257,14 @@ if "converted" in st.session_state:
         st.markdown("**Tu voz / TTS**")
         if "original_audio" in st.session_state:
             orig_bytes, orig_fname = st.session_state["original_audio"]
+            # Elige el MIME correcto según la extensión para que el navegador reproduzca bien.
             orig_fmt = "audio/mpeg" if orig_fname.endswith(".mp3") else "audio/wav"
             st.audio(orig_bytes, format=orig_fmt)
     with col_conv:
         st.markdown("**Voz de Goku 🔥**")
         st.audio(st.session_state["converted"], format="audio/wav")
 
+    # Botón de descarga del WAV final convertido.
     st.download_button(
         label="⬇️ DESCARGAR AUDIO CONVERTIDO",
         data=st.session_state["converted"],
